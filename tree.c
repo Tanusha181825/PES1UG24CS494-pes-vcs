@@ -146,7 +146,9 @@ int tree_from_index(ObjectID *id_out) {
     for (size_t i = 0; i < index.count; i++) {
         IndexEntry *entry = &index.entries[i];
 
-        if (strchr(entry->path, '/') == NULL) {
+        char *slash = strchr(entry->path, '/');
+
+        if (slash == NULL) {
             tree_add_entry(
                 &root,
                 entry->path,
@@ -154,6 +156,14 @@ int tree_from_index(ObjectID *id_out) {
                 OBJ_BLOB,
                 &entry->id
             );
+        } else {
+            char dirname[256];
+            size_t len = slash - entry->path;
+
+            strncpy(dirname, entry->path, len);
+            dirname[len] = '\0';
+
+            /* basic nested directory handling placeholder */
         }
     }
 
