@@ -134,42 +134,128 @@ int index_status(const Index *index) {
 //   - hex_to_hash                      : converting the parsed string to ObjectID
 //
 // Returns 0 on success, -1 on error.
+// Load the index from .pes/index.
 int index_load(Index *index) {
-    // TODO: Implement index loading
-    // (See Lab Appendix for logical steps)
-    (void)index;
-    return -1;
+    FILE *fp = fopen(".pes/index", "r");
+
+    index->count = 0;
+
+    /* If index file doesn't exist, start with empty index */
+    if (fp == NULL) {
+        return 0;
+    }
+
+    while (index->count < MAX_INDEX_ENTRIES) {
+        IndexEntry *entry = &index->entries[index->count];
+
+        char hash_hex[65];
+
+        int rc = fscanf(
+            fp,
+            "%o %64s %ld %ld %255s",
+            &entry->mode,
+            hash_hex,
+            &entry->mtime_sec,
+            &entry->size,
+            entry->path
+        );
+
+        if (rc != 5) {
+            break;
+        }
+
+        hex_to_hash(hash_hex, &entry->hash);
+        index->count++;
+    }
+
+    fclose(fp);
+    return 0;
 }
+
 
 // Save the index to .pes/index atomically.
-//
-// HINTS - Useful functions and syscalls:
-//   - qsort                            : sorting the entries array by path
-//   - fopen (with "w"), fprintf        : writing to the temporary file
-//   - hash_to_hex                      : converting ObjectID for text output
-//   - fflush, fileno, fsync, fclose    : flushing userspace buffers and syncing to disk
-//   - rename                           : atomically moving the temp file over the old index
-//
-// Returns 0 on success, -1 on error.
 int index_save(const Index *index) {
-    // TODO: Implement atomic index saving
-    // (See Lab Appendix for logical steps)
-    (void)index;
-    return -1;
+    FILE *fp = fopen(".pes/index.tmp", "w");
+
+    if (fp == NULL) {
+        return -1;
+    }
+
+    for (int i = 0; i < index->count; i++) {
+        char hash_hex[65];
+
+        hash_to_hex(&index->entries[i].hash, hash_hex);
+
+        fprintf(
+            fp,
+            "%o %s %ld %ld %s\n",
+            index->entries[i].mode,
+            hash_hex,
+            index->entries[i].mtime_sec,
+            index->entries[i].size,
+            index->entries[i].path
+        );
+    }
+
+    fflush(fp);
+    fsync(fileno(fp));
+    fclose(fp);
+
+    rename(".pes/index.tmp", ".pes/index");
+
+    return 0;
 }
 
+
 // Stage a file for the next commit.
-//
-// HINTS - Useful functions and syscalls:
-//   - fopen, fread, fclose             : reading the target file's contents
-//   - object_write                     : saving the contents as OBJ_BLOB
-//   - stat / lstat                     : getting file metadata (size, mtime, mode)
-//   - index_find                       : checking if the file is already staged
-//
-// Returns 0 on success, -1 on error.
 int index_add(Index *index, const char *path) {
-    // TODO: Implement file staging
-    // (See Lab Appendix for logical steps)
-    (void)index; (void)path;
-    return -1;
+    FILE *fp = fopen(path, "rb");
+
+    if (fp == NULL) {
+        return -1;
+    }
+
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        fclose(fp);
+        return -1;
+    }
+
+    void *buffer = malloc(st.st_size);
+    if (buffer == NULL) {
+        fclose(fp);
+        return -1;
+    }
+
+    fread(buffer, 1, st.st_size, fp);
+    fclose(fp);
+
+    ObjectID blob_hash;
+
+    if (object_write(OBJ_BLOB, buffer, st.st_size, &blob_hash) != 0) {
+        free(buffer);
+        return -1;
+    }
+
+    free(buffer);
+
+    IndexEntry *entry = index_find(index, path);
+
+    if (entry == NULL) {
+        if (index->count >= MAX_INDEX_ENTRIES) {
+            return -1;
+        }
+
+        entry = &index->entries[index->count++];
+    }
+
+    strncpy(entry->path, path, sizeof(entry->path) - 1);
+    entry->path[sizeof(entry->path) - 1] = '\0';
+
+    entry->mode = st.st_mode;
+    entry->mtime_sec = st.st_mtime;
+    entry->size = st.st_size;
+    entry->hash = blob_hash;
+
+    return index_save(index);
 }
