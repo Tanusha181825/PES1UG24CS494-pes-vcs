@@ -132,6 +132,7 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 int tree_from_index(ObjectID *id_out) {
     Index index;
     Tree root;
+
     if (index_load(&index) != 0) {
         return -1;
     }
@@ -139,6 +140,22 @@ int tree_from_index(ObjectID *id_out) {
     if (index.count == 0) {
         return -1;
     }
+
     tree_init(&root);
+
+    for (size_t i = 0; i < index.count; i++) {
+        IndexEntry *entry = &index.entries[i];
+
+        if (strchr(entry->path, '/') == NULL) {
+            tree_add_entry(
+                &root,
+                entry->path,
+                entry->mode,
+                OBJ_BLOB,
+                &entry->id
+            );
+        }
+    }
+
     return 0;
 }
