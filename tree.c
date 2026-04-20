@@ -132,6 +132,8 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 int tree_from_index(ObjectID *id_out) {
     Index index;
     Tree root;
+    void *data = NULL;
+    size_t len = 0;
 
     if (index_load(&index) != 0) {
         return -1;
@@ -141,31 +143,38 @@ int tree_from_index(ObjectID *id_out) {
         return -1;
     }
 
-    tree_init(&root);
+    root.count = 0;
 
-    for (size_t i = 0; i < index.count; i++) {
+    for (int i = 0; i < index.count; i++) {
         IndexEntry *entry = &index.entries[i];
 
         char *slash = strchr(entry->path, '/');
 
+        /* Handle only root-level files first */
         if (slash == NULL) {
-            tree_add_entry(
-                &root,
-                entry->path,
-                entry->mode,
-                OBJ_BLOB,
-                &entry->id
-            );
-        } else {
-            char dirname[256];
-            size_t len = slash - entry->path;
+            if (root.count >= MAX_TREE_ENTRIES) {
+                return -1;
+            }
 
-            strncpy(dirname, entry->path, len);
-            dirname[len] = '\0';
+            TreeEntry *te = &root.entries[root.count++];
 
-            /* basic nested directory handling placeholder */
+            te->mode = entry->mode;
+            te->id = entry->id;
+
+            strncpy(te->name, entry->path, sizeof(te->name) - 1);
+            te->name[sizeof(te->name) - 1] = '\0';
         }
     }
 
+    if (tree_serialize(&root, &data, &len) != 0) {
+        return -1;
+    }
+
+    if (object_write(OBJ_TREE, data, len, id_out) != 0) {
+        free(data);
+        return -1;
+    }
+
+    free(data);
     return 0;
 }
